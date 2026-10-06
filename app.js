@@ -738,7 +738,12 @@ function updatePending() {
 }
 let scrollT; function scrollBottom() { clearTimeout(scrollT); scrollT = setTimeout(() => { const m = $("#msgs"); m.scrollTop = m.scrollHeight; }, 30); }
 function setStatus(t) { if (S.pending) { S.pending.status = t; updatePending(); } }
-function autosize() { const a = $("#ask"); a.style.height = "auto"; a.style.height = Math.min(a.scrollHeight, 200) + "px"; }
+function autosize() {
+  const a = $("#ask");
+  if (!a.value.trim()) { a.style.height = ""; return; }      // leer: CSS-Mindesthöhe
+  if (!a.offsetParent) return;                              // unsichtbar: nicht messen
+  a.style.height = "auto"; a.style.height = Math.min(a.scrollHeight, 200) + "px";
+}
 const toolVerb = (n) => ({ remember: "Merkt sich etwas …", update_fact: "Aktualisiert Gedächtnis …", forget: "Vergisst etwas …", add_task: "Legt Aufgabe an …", complete_task: "Hakt Aufgabe ab …", upsert_project: "Aktualisiert Projekt …", add_journal: "Schreibt ins Tagebuch …", search_memory: "Durchsucht Gedächtnis …" }[n] || "Arbeitet …");
 
 function canSend() {
@@ -968,7 +973,7 @@ function setTab(name, push = false) {
   for (const n of ["chat", "today", "know", "more"]) $("#p-" + n).hidden = n !== name;
   $$("nav.tabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", b.dataset.tab === name));
   LS.set("tab", name);
-  if (name === "chat") scrollBottom(); else $("#p-" + name).scrollTop = 0;
+  if (name === "chat") { autosize(); scrollBottom(); } else $("#p-" + name).scrollTop = 0;
   if (name === "today") renderToday(); if (name === "know") renderKnow(); if (name === "more") renderMore();
   if (push) try {
     const st = history.state || {};
