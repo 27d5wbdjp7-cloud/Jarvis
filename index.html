@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Jarvis</title>
+<meta name="description" content="Dein persönlicher Assistent mit Gedächtnis für Beruf und Alltag.">
+<meta name="theme-color" content="#0E141B" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#EDF0F3" media="(prefers-color-scheme: light)">
+<meta name="color-scheme" content="dark light">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Jarvis">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.anthropic.com; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; worker-src 'self'; base-uri 'self'; form-action 'none'; object-src 'none'">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="64x64" href="icons/favicon-64.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="fonts/fonts.css?v=1.1.0">
+<link rel="stylesheet" href="styles.css?v=1.1.0">
+</head>
+<body>
+
+<!-- ===== Onboarding (nur beim ersten Start) ===== -->
+<section id="onboard" class="onboard" hidden>
+  <div class="hero">
+    <img src="icons/icon-192.png" alt="">
+    <h1>JARV<span>I</span>S</h1>
+    <p class="sub">Dein persönlicher Assistent mit Gedächtnis. Dein Gedächtnis und deine Gespräche liegen nur auf diesem Gerät. Nachrichten gehen an api.anthropic.com; Sprachein- und -ausgabe nutzen den Sprachdienst deines Geräts.</p>
+  </div>
+  <div class="card">
+    <p class="hint" id="ob-install-hint" hidden>Tipp: Installiere Jarvis zuerst als App und richte ihn dort ein. iPhone: Teilen → „Zum Home-Bildschirm“ (die installierte App hat einen eigenen Speicher). Android: Chrome-Menü ⋮ → „App installieren“.</p>
+    <label class="field"><span>Wie soll Jarvis dich nennen?</span><input type="text" id="ob-name" placeholder="Vorname" autocomplete="given-name"></label>
+    <label class="field"><span>Dein Anthropic API-Schlüssel</span>
+      <div class="keyrow"><input type="password" id="ob-key" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><button class="btn" type="button" id="ob-key-toggle" aria-label="Schlüssel anzeigen" aria-pressed="false">👁</button></div>
+    </label>
+    <p class="hint">Den Schlüssel bekommst du unter <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>: Konto anlegen, unter „Billing“ Guthaben vorab aufladen (z. B. 20 $, kein Abo), dann „Create Key“. Tipp: Dort kannst du ein monatliches Ausgabenlimit setzen. Der Schlüssel bleibt auf diesem Gerät und geht nur an api.anthropic.com. Jede Antwort kostet wenige Cent; die Tageskosten siehst du unter „Mehr“.</p>
+    <button class="btn primary block" id="ob-start" type="button">Los geht's</button>
+    <p class="hint">Du hast schon ein Backup aus Jarvis? <button class="btn small" type="button" id="ob-restore">Backup wiederherstellen</button></p>
+  </div>
+</section>
+
+<!-- ===== App ===== -->
+<div class="app" id="app" hidden>
+  <header class="topbar">
+    <div class="in">
+      <div class="brand">JARV<span>I</span>S</div>
+      <div class="status" id="status"></div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Chat -->
+    <section class="panel" id="p-chat">
+      <div class="chat-toolbar">
+        <div class="title" id="conv-title">Neues Gespräch</div>
+        <div class="row">
+          <button class="icon-btn" id="btn-speak" title="Antworten vorlesen" aria-pressed="false" aria-label="Antworten vorlesen"><svg viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6l-5 4H4z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
+          <button class="icon-btn" id="btn-convs" title="Gespräche" aria-label="Gespräche"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
+          <button class="icon-btn" id="btn-new" title="Neues Gespräch" aria-label="Neues Gespräch"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+        </div>
+      </div>
+      <div class="msgs" id="msgs"></div>
+      <div class="listening" id="listening" hidden></div>
+      <div class="composer">
+        <textarea id="ask" rows="1" placeholder="Nachricht an Jarvis …" aria-label="Nachricht an Jarvis" enterkeyhint="enter"></textarea>
+        <button class="icon-btn" id="btn-mic" title="Sprechen" aria-label="Sprechen"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></svg></button>
+        <button class="icon-btn active" id="btn-send" title="Senden" aria-label="Senden"><svg viewBox="0 0 24 24"><path d="M5 12l14-7-4 7 4 7-14-7z"/><path d="M15 12H5"/></svg></button>
+      </div>
+    </section>
+
+    <!-- Heute -->
+    <section class="panel" id="p-today" hidden>
+      <div class="today-head">
+        <h2 id="today-greet">Dein Tag</h2>
+        <div class="row"><div class="date" id="today-date"></div><button class="btn small" data-back>← Chat</button></div>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="btn-checkin">Tages-Check-in</button>
+        <button class="btn" id="btn-evening">Abend-Reflexion</button>
+        <button class="btn" id="btn-weekly">Wochenrückblick</button>
+      </div>
+      <div class="card tight">
+        <div class="row between"><span class="label">Was bewegt dich gerade?</span><span class="meta" id="journal-today-meta"></span></div>
+        <textarea id="journal-input" rows="2" placeholder="Gedanken, Sorgen, Ideen, Stimmung … (wird im Tagebuch gespeichert)"></textarea>
+        <div class="row"><button class="btn small" id="journal-save">Ins Tagebuch</button><button class="btn small" id="journal-talk">Mit Jarvis besprechen</button></div>
+      </div>
+      <div class="card tight">
+        <div class="row between"><span class="label">Heute fällig &amp; überfällig</span><button class="btn small" id="today-add-task">+ Aufgabe</button></div>
+        <div class="list" id="today-tasks"></div>
+      </div>
+      <div class="card tight">
+        <span class="label">Aktive Projekte</span>
+        <div id="today-projects" class="list"></div>
+      </div>
+      <div class="card tight">
+        <span class="label">Letzte Tagebuch-Einträge</span>
+        <div id="today-journal" class="list"></div>
+      </div>
+    </section>
+
+    <!-- Wissen -->
+    <section class="panel" id="p-know" hidden>
+      <div class="panel-head"><div class="row between"><h2>Wissen</h2><button class="btn small" data-back>← Chat</button></div><p class="sub">Alles, was Jarvis über dich, deine Firma, deine Finanzen und deine Projekte weiß. Es fließt in jedes Gespräch ein; Änderungen hier wirken ab der nächsten Nachricht.</p></div>
+      <div class="subtabs" role="tablist">
+        <button role="tab" data-sub="facts" aria-selected="true">Fakten</button>
+        <button role="tab" data-sub="projects" aria-selected="false">Projekte</button>
+        <button role="tab" data-sub="tasks" aria-selected="false">Aufgaben</button>
+        <button role="tab" data-sub="profile" aria-selected="false">Profil</button>
+        <button role="tab" data-sub="import" aria-selected="false">Einspeisen</button>
+      </div>
+
+      <div id="sub-facts" class="panel">
+        <div class="row">
+          <input type="search" id="fact-search" class="grow" placeholder="Suchen …" aria-label="Fakten durchsuchen">
+        </div>
+        <div class="chips" id="fact-cats"></div>
+        <div class="card tight">
+          <div class="row"><input type="text" id="fact-new" class="grow" placeholder="Etwas Neues merken …" aria-label="Neuer Fakt"><select id="fact-new-cat" class="auto" aria-label="Kategorie"></select><button class="btn" id="fact-add">Merken</button></div>
+        </div>
+        <div class="card tight"><div class="row between"><span class="label">Gemerkte Fakten</span><span class="meta" id="fact-count"></span></div><div class="list" id="fact-list"></div></div>
+      </div>
+
+      <div id="sub-projects" class="panel" hidden>
+        <div class="row"><button class="btn primary" id="project-add">+ Projekt</button><span class="hint">Jarvis aktualisiert Status und nächste Schritte auch im Gespräch.</span></div>
+        <div id="project-list" class="panel"></div>
+      </div>
+
+      <div id="sub-tasks" class="panel" hidden>
+        <div class="card tight">
+          <div class="row">
+            <input type="text" id="task-title" class="grow" placeholder="Neue Aufgabe" aria-label="Neue Aufgabe">
+            <input type="date" id="task-due" class="auto" aria-label="Fällig am">
+            <select id="task-area" class="auto" aria-label="Bereich"><option>Beruf</option><option>Privat</option></select>
+            <button class="btn primary" id="task-add">Hinzufügen</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="chips" id="task-filters"><button class="chip active" data-f="offen">Offen</button><button class="chip" data-f="Beruf">Beruf</button><button class="chip" data-f="Privat">Privat</button><button class="chip" data-f="erledigt">Erledigt</button></div>
+        </div>
+        <div class="card tight"><div class="list" id="task-list"></div></div>
+      </div>
+
+      <div id="sub-profile" class="panel" hidden>
+        <div class="card">
+          <span class="label">Profil</span>
+          <div class="form">
+            <label class="field"><span>Name</span><input type="text" id="pf-name"></label>
+            <label class="field"><span>Wohnort / Region</span><input type="text" id="pf-ort"></label>
+            <label class="field full"><span>Beruf &amp; Firma</span><input type="text" id="pf-job" placeholder="z. B. Geschäftsführer, AB Im- und Export …"></label>
+            <label class="field full"><span>Wie soll Jarvis mit dir reden?</span><input type="text" id="pf-ton" placeholder="z. B. per Du, direkt, kurz, mit klaren Empfehlungen"></label>
+            <label class="field full"><span>Was Jarvis immer im Kopf haben soll</span><textarea id="pf-more" rows="4" placeholder="Familie, Werte, große Ziele, aktuelle Lebenssituation …"></textarea></label>
+          </div>
+          <div class="row"><button class="btn primary" id="pf-save">Profil speichern</button></div>
+        </div>
+      </div>
+
+      <div id="sub-import" class="panel" hidden>
+        <div class="card">
+          <span class="label">Text einspeisen</span>
+          <p class="hint">Füge beliebigen Text ein: alte Chats, Notizen, Firmenbeschreibung, Zahlen, Projektpläne. Jarvis zieht die wichtigen Fakten heraus; du prüfst sie vor dem Speichern. Keine Passwörter, PINs oder Kontonummern einfügen.</p>
+          <textarea id="imp-text" rows="6" placeholder="Text hier einfügen …"></textarea>
+          <div class="row"><button class="btn primary" id="imp-run">Fakten herausziehen</button><span class="meta" id="imp-msg"></span></div>
+        </div>
+        <div class="card">
+          <span class="label">Dateien einspeisen</span>
+          <p class="hint">PDF (bis 20 MB), Fotos von Dokumenten oder Visitenkarten (JPEG, PNG, GIF, WebP, bis 7 MB; größere werden verkleinert) und Textdateien (.txt, .md, .csv, .json).</p>
+          <label class="dropzone" id="dropzone"><strong>Dateien auswählen</strong><span class="hint">am PC auch hierher ziehen</span><input type="file" id="imp-files" class="visually-hidden" multiple accept=".pdf,.txt,.md,.csv,.json,image/jpeg,image/png,image/gif,image/webp"></label>
+          <div class="filelist" id="imp-filelist"></div>
+          <div class="row"><button class="btn primary" id="imp-files-run" disabled>Dateien auswerten</button><span class="meta" id="imp-files-msg"></span></div>
+        </div>
+        <div class="card">
+          <span class="label">Gedächtnis aufräumen</span>
+          <p class="hint">Jarvis prüft alle Fakten, fasst Doppeltes zusammen, aktualisiert Veraltetes und sortiert um. Empfohlen etwa einmal im Monat oder nach einem großen Import. Dauert 1–3 Minuten.</p>
+          <div class="row"><button class="btn" id="btn-consolidate">Aufräumen starten</button><span class="meta" id="consolidate-msg"></span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Mehr -->
+    <section class="panel" id="p-more" hidden>
+      <div class="panel-head"><div class="row between"><h2>Mehr</h2><button class="btn small" data-back>← Chat</button></div></div>
+      <div class="card">
+        <span class="label">Verbindung zu Claude</span>
+        <label class="field"><span>API-Schlüssel</span>
+          <div class="keyrow"><input type="password" id="set-key" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><button class="btn" type="button" id="set-key-toggle" aria-label="Schlüssel anzeigen" aria-pressed="false">👁</button></div>
+        </label>
+        <div class="row"><button class="btn primary" id="set-save">Schlüssel speichern</button><button class="btn" id="set-test">Verbindung testen</button><span class="meta" id="set-msg"></span></div>
+        <div class="form">
+          <label class="field"><span>Modell</span>
+            <select id="set-model">
+              <option value="claude-opus-5-5">Claude Opus 5.5 (am klügsten, empfohlen)</option>
+              <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (schneller, günstiger)</option>
+              <option value="claude-haiku-4-5">Claude Haiku 4.5 (am günstigsten)</option>
+            </select>
+          </label>
+          <label class="field"><span>Denktiefe</span>
+            <select id="set-effort">
+              <option value="low">Niedrig (schnell, günstig)</option>
+              <option value="medium">Mittel</option>
+              <option value="high">Hoch (gründlich, mehr Tokens)</option>
+            </select>
+          </label>
+        </div>
+        <dl class="kv" id="usage-stats"></dl>
+        <p class="hint">Der Schlüssel liegt nur in diesem Browser bzw. dieser installierten App. Tageskosten siehe oben, genaue Abrechnung unter <a href="https://console.anthropic.com/settings/billing" target="_blank" rel="noopener">console.anthropic.com</a>.</p>
+      </div>
+
+      <div class="card">
+        <span class="label">Sprache</span>
+        <div class="toggle"><label for="set-tts">Antworten automatisch vorlesen</label><input type="checkbox" id="set-tts"></div>
+        <div class="toggle"><label for="set-handsfree">Freisprechen: nach dem Vorlesen wieder zuhören</label><input type="checkbox" id="set-handsfree"></div>
+        <div class="toggle"><label for="set-voice">Stimme</label><select id="set-voice" class="auto voice"></select></div>
+        <div class="row"><button class="btn small" id="set-voice-test">Stimme testen</button><button class="btn small" id="btn-stt-reset" hidden>Spracheingabe erneut versuchen</button></div>
+        <p class="hint" id="voice-support"></p>
+        <p class="hint">Spracheingabe und Vorlesen nutzen den Sprachdienst deines Browsers bzw. Geräts (Google bei Chrome/Android, Apple beim iPhone). Audio bzw. Text können an diesen Anbieter gesendet werden; Stimmen mit „online“ im Namen lesen über das Netz vor.</p>
+      </div>
+
+      <div class="card">
+        <span class="label">Darstellung</span>
+        <div class="toggle"><label for="set-theme">Farbschema</label><select id="set-theme" class="auto"><option value="">Automatisch (wie System)</option><option value="dark">Dunkel</option><option value="light">Hell</option></select></div>
+        <div class="toggle"><label for="set-stamps">Uhrzeit bei Nachrichten anzeigen</label><input type="checkbox" id="set-stamps"></div>
+      </div>
+
+      <div class="card">
+        <span class="label">Sicherung</span>
+        <p class="hint">Alle Daten liegen nur auf diesem Gerät. Sichere sie regelmäßig als Datei, damit beim Gerätewechsel oder nach dem Löschen der Browserdaten nichts verloren geht. Vor dem Installieren als App ein Backup speichern und dort wieder laden.</p>
+        <div class="row"><button class="btn primary" id="btn-export">Backup speichern</button><label class="btn">Backup laden<input type="file" id="import-backup" class="visually-hidden" accept=".json,.txt,application/json,text/plain"></label></div>
+        <p class="hint" id="backup-hint"></p>
+        <dl class="kv" id="stats"></dl>
+      </div>
+
+      <div class="card">
+        <span class="label">App</span>
+        <div class="row" id="install-row" hidden><button class="btn primary" id="btn-install">Auf dem Startbildschirm installieren</button></div>
+        <details id="install-details"><summary>Installation auf dem Handy</summary>
+          <p class="hint top"><strong>iPhone:</strong> In Safari öffnen → Teilen-Symbol → „Zum Home-Bildschirm“. Die installierte App hat einen eigenen Speicher: Schlüssel und Daten dort noch einmal eintragen bzw. per Backup übernehmen. Spracheingabe: In der installierten App das Mikrofon der iPhone-Tastatur (Diktieren) nutzen.<br><strong>Android:</strong> In Chrome öffnen → Menü ⋮ → „App installieren“ bzw. „Zum Startbildschirm hinzufügen“.</p>
+        </details>
+        <dl class="kv"><dt>Version</dt><dd id="app-version"></dd><dt>Speicher</dt><dd id="storage-info">–</dd><dt>Modus</dt><dd id="mode-info">–</dd></dl>
+        <div class="row"><button class="btn small" id="btn-update">Nach Update suchen</button><button class="btn small" id="btn-reload">Neu laden</button><button class="btn small" id="btn-diag">Diagnose kopieren</button></div>
+      </div>
+
+      <div class="card">
+        <span class="label">Zurücksetzen</span>
+        <p class="hint">Entfernt Gedächtnis, Projekte, Aufgaben, Tagebuch, Gespräche, Einstellungen und deinen API-Schlüssel von diesem Gerät. Backups enthalten den Schlüssel nicht.</p>
+        <div class="row"><button class="btn danger" id="btn-wipe">Alle Daten löschen</button></div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabs" aria-label="Bereiche"><div class="in" role="tablist">
+    <button role="tab" data-tab="chat" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>Chat</button>
+    <button role="tab" data-tab="today" aria-selected="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>Heute</button>
+    <button role="tab" data-tab="know" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V6a3 3 0 0 0-3-2zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1"/></svg>Wissen</button>
+    <button role="tab" data-tab="more" aria-selected="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Mehr</button>
+  </div></nav>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<div class="overlay" id="overlay" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+
+<script src="app.js?v=1.1.0"></script>
+</body>
+</html>
