@@ -4,7 +4,7 @@
  */
 "use strict";
 
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.1.2";
 const API_URL = "https://api.anthropic.com/v1/messages";
 const TZ = "Europe/Berlin";
 const MODELS = {
@@ -861,7 +861,11 @@ function clearAsk() {
   recGen++; recFinal = ""; recBase = ""; wantListening = false;
   if (rec) { try { rec.abort(); } catch {} rec = null; }
   if (S.listening) resetMicUI();
-  $("#ask").value = ""; LS.del("draft"); autosize();
+  const a = $("#ask"), old = a.value;
+  // Handy-Tastatur bzw. iPhone-Diktat zuerst beenden, sonst schreibt sie den Text nach dem Leeren zurück
+  if (matchMedia("(pointer:coarse)").matches) a.blur();
+  a.value = ""; LS.del("draft"); autosize();
+  setTimeout(() => { if (old.trim() && a.value.trim() === old.trim()) { a.value = ""; LS.del("draft"); autosize(); } }, 350);
 }
 function micAvailable() { return !!SR && !sttBroken; }
 function resetMicUI() { S.listening = false; $("#btn-mic").classList.remove("rec"); $("#listening").hidden = true; }
