@@ -4,7 +4,7 @@
  */
 "use strict";
 
-const APP_VERSION = "1.1.2";
+const APP_VERSION = "1.2.0";
 const API_URL = "https://api.anthropic.com/v1/messages";
 const TZ = "Europe/Berlin";
 const MODELS = {
@@ -1258,7 +1258,7 @@ function renderMore() {
   $("#mode-info").textContent = isStandalone() ? "installierte App" : "Browser (nicht installiert)";
   $("#backup-hint").textContent = IS_IOS && isStandalone() ? "Auf dem iPhone öffnet sich das Teilen-Menü: dort „In Dateien sichern“ wählen." : "";
   renderStats();
-  startBackupPrep();
+  startBackupPrep(); prepareReport();
   if (navigator.storage?.estimate) navigator.storage.estimate().then((e) => { $("#storage-info").textContent = `${((e.usage || 0) / 1048576).toFixed(1)} MB belegt` + (e.quota ? ` von ${(e.quota / 1073741824).toFixed(1)} GB` : "") + (S.persisted ? " · dauerhaft" : ""); }).catch(() => {});
   if (navigator.storage?.persisted) navigator.storage.persisted().then((p) => { S.persisted = p; if (p && !/dauerhaft/.test($("#storage-info").textContent)) $("#storage-info").textContent += " · dauerhaft"; }).catch(() => {});
 }
@@ -1293,6 +1293,59 @@ function exportBackup() {
   }
   downloadOrCopy(json, name);
 }
+/* ======================= Lesbarer Export ======================= */
+/* Eine HTML-Übersicht (druck-/PDF-fähig) plus CSV-Tabellen für Excel. Wird vorbereitet, sobald "Mehr" offen ist,
+ * damit der Tipp auf den Knopf ohne Wartezeit das Teilen-Menü öffnen kann (iOS verlangt das). */
+let reportFiles = null, reportVer = -1, reportPrep = null;
+const csvCell = (v) => { const s = String(v ?? ""); return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+const csv = (rows) => "﻿" + rows.map((r) => r.map(csvCell).join(";")).join("\r\n");   // BOM + Semikolon: Excel (deutsch) öffnet korrekt
+const dt = (t) => (t ? new Date(t).toLocaleString("de-DE", { timeZone: TZ, day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
+async function buildReport() {
+  const v = S.dataVer, day = todayISO(), p = S.profile || {};
+  const convs = [...S.convs].sort((a, b) => b.updated - a.updated);
+  const convMsgs = []; for (const c of convs) convMsgs.push({ c, msgs: (await DB.msgsByConv(c.id)).sort((a, b) => a.seq - b.seq) });
+  const facts = S.facts.filter((f) => !f.archived), archived = S.facts.filter((f) => f.archived);
+  const textOfMsg = (m) => (m.role === "user" ? m.display || "" : (m.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n"));
+  const sec = (title, body) => `<section><h2>${esc(title)}</h2>${body}</section>`;
+  const html = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jarvis – Export ${day}</title>
+<style>body{font:15px/1.55 -apple-system,"Segoe UI",system-ui,sans-serif;color:#16212C;background:#fff;max-width:820px;margin:0 auto;padding:24px 16px}h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;border-bottom:2px solid #9C5F0C;padding-bottom:4px;margin-top:32px}h3{font-size:16px;margin:18px 0 6px}.meta{color:#5A6777;font-size:13px}ul{padding-left:20px}li{margin:3px 0}table{border-collapse:collapse;width:100%;font-size:14px}td,th{border:1px solid #D5DCE4;padding:5px 8px;text-align:left;vertical-align:top}th{background:#F5F7FA}.msg{margin:8px 0;padding:8px 10px;border-radius:8px;white-space:pre-wrap}.u{background:#EDF0F3}.a{border-left:3px solid #9C5F0C}.toc a{color:#9C5F0C}@media print{h2{break-after:avoid}.conv{break-inside:avoid-page}}</style></head><body>
+<h1>Jarvis – alle Daten</h1><p class="meta">Exportiert am ${esc(dt(Date.now()))} · ${facts.length} Fakten · ${S.projects.length} Projekte · ${S.tasks.length} Aufgaben · ${S.journal.length} Tagebuch-Einträge · ${convs.length} Gespräche</p>
+<p class="toc"><a href="#profil">Profil</a> · <a href="#fakten">Fakten</a> · <a href="#projekte">Projekte</a> · <a href="#aufgaben">Aufgaben</a> · <a href="#tagebuch">Tagebuch</a> · <a href="#gespraeche">Gespräche</a></p>
+<div id="profil">${sec("Profil", `<table><tr><th>Name</th><td>${esc(p.name || "")}</td></tr><tr><th>Beruf &amp; Firma</th><td>${esc(p.job || "")}</td></tr><tr><th>Ort</th><td>${esc(p.ort || "")}</td></tr><tr><th>Umgangston</th><td>${esc(p.ton || "")}</td></tr><tr><th>Immer im Kopf</th><td>${esc(p.more || "")}</td></tr></table>`)}</div>
+<div id="fakten">${sec("Fakten", CAT_KEYS.filter((c) => facts.some((f) => f.cat === c)).map((c) => `<h3>${esc(CATS[c])}</h3><ul>${facts.filter((f) => f.cat === c).sort((a, b) => a.created - b.created).map((f) => `<li>${esc(f.text)} <span class="meta">(${esc(dt(f.updated))})</span></li>`).join("")}</ul>`).join("") || "<p>Keine.</p>")}${archived.length ? `<h3>Archiv</h3><ul>${archived.map((f) => `<li>${esc(f.text)}</li>`).join("")}</ul>` : ""}</div>
+<div id="projekte">${sec("Projekte", S.projects.map((pr) => `<h3>${esc(pr.name)} <span class="meta">– ${esc(STATUS_LABEL[pr.status] || pr.status)}</span></h3>${pr.description ? `<p>${esc(pr.description)}</p>` : ""}${pr.nextSteps.length ? `<p><b>Nächste Schritte</b></p><ul>${pr.nextSteps.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}${pr.notes.length ? `<p><b>Notizen</b></p><ul>${pr.notes.map((n) => `<li>${esc(dt(n.t))}: ${esc(n.text)}</li>`).join("")}</ul>` : ""}`).join("") || "<p>Keine.</p>")}</div>
+<div id="aufgaben">${sec("Aufgaben", S.tasks.length ? `<table><tr><th>Aufgabe</th><th>Bereich</th><th>Projekt</th><th>Fällig</th><th>Status</th></tr>${sortTasks(S.tasks).map((t) => `<tr><td>${esc(t.title)}</td><td>${esc(t.area)}</td><td>${esc(t.project || "")}</td><td>${t.due ? esc(fmtDate(t.due, { day: "2-digit", month: "2-digit", year: "numeric" })) : ""}</td><td>${t.done ? "erledigt" : "offen"}</td></tr>`).join("")}</table>` : "<p>Keine.</p>")}</div>
+<div id="tagebuch">${sec("Tagebuch", [...S.journal].sort((a, b) => b.created - a.created).map((j) => `<h3>${esc(fmtDate(j.date, { weekday: "long", day: "numeric", month: "long", year: "numeric" }))}${j.mood ? ` <span class="meta">– ${esc(j.mood)}</span>` : ""}</h3><p>${esc(j.text)}</p>`).join("") || "<p>Keine Einträge.</p>")}</div>
+<div id="gespraeche">${sec("Gespräche", convMsgs.map(({ c, msgs }) => `<div class="conv"><h3>${esc(c.title)} <span class="meta">– ${esc(dt(c.created))}</span></h3>${c.summary ? `<p class="meta"><b>Zusammenfassung:</b><br>${esc(c.summary).replace(/\n/g, "<br>")}</p>` : ""}${msgs.filter((m) => !(m.role === "user" && m.kind === "tool") && textOfMsg(m).trim()).map((m) => `<div class="msg ${m.role === "user" ? "u" : "a"}"><span class="meta">${m.role === "user" ? "Du" : "Jarvis"} · ${esc(dt(m.t))}</span>\n${esc(textOfMsg(m))}</div>`).join("")}</div>`).join("") || "<p>Keine.</p>")}</div>
+</body></html>`;
+  const files = [
+    new File([html], `Jarvis-Export-${day}.html`, { type: "text/html" }),
+    new File([csv([["Kategorie", "Fakt", "Quelle", "Archiviert", "Geändert"], ...S.facts.map((f) => [CATS[f.cat] || f.cat, f.text, f.source || "", f.archived ? "ja" : "", dt(f.updated)])])], `Jarvis-Fakten-${day}.csv`, { type: "text/csv" }),
+    new File([csv([["Aufgabe", "Bereich", "Projekt", "Fällig", "Status", "Erstellt"], ...sortTasks(S.tasks).map((t) => [t.title, t.area, t.project || "", t.due || "", t.done ? "erledigt" : "offen", dt(t.created)])])], `Jarvis-Aufgaben-${day}.csv`, { type: "text/csv" }),
+    new File([csv([["Projekt", "Status", "Beschreibung", "Nächste Schritte", "Letzte Notiz"], ...S.projects.map((pr) => [pr.name, STATUS_LABEL[pr.status] || pr.status, pr.description, pr.nextSteps.join(" | "), pr.notes.length ? pr.notes[pr.notes.length - 1].text : ""])])], `Jarvis-Projekte-${day}.csv`, { type: "text/csv" }),
+    new File([csv([["Datum", "Stimmung", "Eintrag"], ...[...S.journal].sort((a, b) => b.created - a.created).map((j) => [j.date, j.mood || "", j.text])])], `Jarvis-Tagebuch-${day}.csv`, { type: "text/csv" }),
+  ];
+  reportFiles = files; reportVer = v; return files;
+}
+function prepareReport() { if (!reportPrep) reportPrep = buildReport().catch((e) => { diag("export", e.message); return null; }).finally(() => { reportPrep = null; }); return reportPrep; }
+function exportReport() {
+  if (!reportFiles || reportVer !== S.dataVer) { toast("Export wird vorbereitet … bitte gleich noch einmal tippen."); prepareReport(); return; }
+  const files = reportFiles;
+  if (navigator.canShare && navigator.canShare({ files })) {
+    navigator.share({ files, title: "Jarvis – alle Daten" }).then(() => toast("Export geteilt.")).catch((e) => { if (e.name !== "AbortError") downloadFiles(files); });
+    return;
+  }
+  downloadFiles(files);
+}
+function downloadFiles(files) {
+  if (IS_IOS && isStandalone()) {
+    // iPhone-App ohne Teilen: Übersicht in einem neuen Fenster öffnen (dort Teilen → Drucken/PDF)
+    const url = URL.createObjectURL(files[0]); window.open(url, "_blank"); setTimeout(() => URL.revokeObjectURL(url), 60000); return;
+  }
+  files.forEach((f, i) => setTimeout(() => { const url = URL.createObjectURL(f); const a = document.createElement("a"); a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000); }, i * 400));
+  toast(`${files.length} Dateien werden heruntergeladen.`);
+}
+
 function downloadOrCopy(json, name) {
   if (!(IS_IOS && isStandalone())) {
     const url = URL.createObjectURL(new Blob([json], { type: "text/plain" })); const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
@@ -1521,6 +1574,7 @@ function wire() {
   $("#set-theme").onchange = (e) => { settings.theme = e.target.value; LS.set("settings", settings); applyTheme(); };
   $("#set-stamps").onchange = (e) => { settings.stamps = e.target.checked; LS.set("settings", settings); renderChat(); };
   $("#btn-export").onclick = exportBackup;
+  $("#btn-report").onclick = exportReport;
   $("#import-backup").addEventListener("change", (e) => { if (e.target.files[0]) importBackup(e.target.files[0]); e.target.value = ""; });
   $("#btn-install").onclick = async () => { const ev = S.deferredInstall; if (!ev) return; S.deferredInstall = null; $("#install-row").hidden = true; try { await ev.prompt(); await ev.userChoice; } catch {} };
   $("#btn-update").onclick = async () => { if (S.swReg) { await S.swReg.update().catch(() => {}); toast(S.swReg.waiting ? "Update bereit – bitte „Neu laden“." : "Nach Updates gesucht. Du bist auf dem aktuellen Stand."); } else location.reload(); };
