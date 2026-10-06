@@ -4,7 +4,7 @@
  */
 "use strict";
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 const API_URL = "https://api.anthropic.com/v1/messages";
 const TZ = "Europe/Berlin";
 const MODELS = {
@@ -757,6 +757,8 @@ function canSend() {
 async function send(text, opts = {}) {
   text = String(text || "").trim();
   if (!text || !canSend()) return false;
+  // Eingabefeld sofort leeren (auch bei Spracheingabe) und laufende Erkennung verwerfen, damit kein alter Text zurückkommt
+  if (opts.fromInput || $("#ask").value.trim() === text) clearAsk();
   ensurePersisted(); unlockTTS(); stopSpeaking(); holdWakeLock();
   // Nach längerer Pause (4 h) beginnt ein neues Gespräch mit frischem Gedächtnis-Stand; das alte wird im Hintergrund zusammengefasst
   const lastActive = Math.max(S.conv ? S.conv.updated || 0 : 0, S.convOpenedAt || 0);
@@ -767,7 +769,6 @@ async function send(text, opts = {}) {
   const seq = (msgs.length ? msgs[msgs.length - 1].seq : 0) + 1;
   const um = { id: uid(), conv: conv.id, seq, role: "user", t: Date.now(), display: opts.display || text, content: [{ type: "text", text: `[${nowText()}]` }, { type: "text", text }] };
   msgs.push(um); await saveMsg(um); conv.updated = Date.now(); await DB.put("convs", conv);
-  if ($("#ask").value.trim() === text) { $("#ask").value = ""; LS.del("draft"); autosize(); }
   S.busy = true; S.ctl = new AbortController(); S.pending = { text: "", status: "Denkt nach …", chips: [] };
   renderChat(); setTab("chat"); renderStatus();
   let finalNote = "";
@@ -854,8 +855,14 @@ function showConversations() {
 
 /* ======================= Sprache: Eingabe ======================= */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, recFinal = "", recBase = "", wantListening = false, userStopped = false, sttBroken = LS.get("sttBroken", false);
+let rec = null, recGen = 0, recFinal = "", recBase = "", wantListening = false, userStopped = false, sttBroken = LS.get("sttBroken", false);
 const STT_HINT = "Spracheingabe ist in der installierten App nicht verfügbar. Tippe auf das Mikrofon deiner Tastatur (Diktieren).";
+function clearAsk() {
+  recGen++; recFinal = ""; recBase = ""; wantListening = false;
+  if (rec) { try { rec.abort(); } catch {} rec = null; }
+  if (S.listening) resetMicUI();
+  $("#ask").value = ""; LS.del("draft"); autosize();
+}
 function micAvailable() { return !!SR && !sttBroken; }
 function resetMicUI() { S.listening = false; $("#btn-mic").classList.remove("rec"); $("#listening").hidden = true; }
 /* iPhone-Home-Bildschirm-Apps: die Erkennung existiert, startet aber nie. Erst nach zwei Fehlversuchen dauerhaft merken. */
@@ -879,16 +886,19 @@ function startListening(auto = false) {
 }
 function startSession(auto, firstSession) {
   let alive = false, gotFinal = false, watchdog = null;
+  const gen = recGen, stale = () => gen !== recGen;
   rec = new SR(); rec.lang = "de-DE"; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
-  const finish = () => { wantListening = false; resetMicUI(); const txt = $("#ask").value.trim(); if (txt && settings.handsfree && recFinal.trim()) send(txt); };
+  const finish = () => { if (stale()) return; wantListening = false; resetMicUI(); const txt = $("#ask").value.trim(); if (txt && settings.handsfree && recFinal.trim()) send(txt, { fromInput: true }); };
   rec.onstart = rec.onaudiostart = () => { alive = true; clearTimeout(watchdog); LS.set("sttMisses", 0); };
   rec.onresult = (e) => {
+    if (stale()) return;
     alive = true; clearTimeout(watchdog); let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) { recFinal += (recFinal && !/\s$/.test(recFinal) ? " " : "") + t; gotFinal = true; } else interim += t; }
     $("#ask").value = (recBase ? recBase + " " : "") + (recFinal + " " + interim).trim(); autosize(); LS.set("draft", $("#ask").value);
   };
   rec.onerror = (e) => {
     clearTimeout(watchdog);
+    if (stale()) return;
     const fatal = ["not-allowed", "service-not-allowed", "audio-capture"].includes(e.error);
     if (IS_IOS && isStandalone() && !alive && !userStopped && (fatal || e.error === "aborted")) { markSttBroken(e.error !== "aborted"); return; }
     if (fatal) wantListening = false;
@@ -897,7 +907,9 @@ function startSession(auto, firstSession) {
     toast(msg || "Spracherkennung: " + e.error, { warn: true });
   };
   rec.onend = () => {
-    clearTimeout(watchdog); rec = null;
+    clearTimeout(watchdog);
+    if (stale()) return;
+    rec = null;
     // Android stoppt nach kurzer Stille von selbst: weiterhören, solange der Nutzer nicht beendet hat.
     // Freisprechen: eine Pause ohne neuen Text beendet die Eingabe.
     const again = wantListening && !document.hidden && (!auto || gotFinal || !recFinal.trim());
@@ -1405,8 +1417,8 @@ function wire() {
   window.addEventListener("pagehide", saveDrafts);
 
   // Chat
-  $("#btn-send").onclick = () => (S.busy ? S.ctl?.abort() : send($("#ask").value));
-  $("#ask").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !matchMedia("(pointer:coarse)").matches) { e.preventDefault(); send($("#ask").value); } });
+  $("#btn-send").onclick = () => (S.busy ? S.ctl?.abort() : send($("#ask").value, { fromInput: true }));
+  $("#ask").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !matchMedia("(pointer:coarse)").matches) { e.preventDefault(); send($("#ask").value, { fromInput: true }); } });
   $("#ask").addEventListener("input", autosize);
   $("#ask").addEventListener("focus", () => { if (S.speaking) stopSpeaking(); });
   if (IS_IOS) $("#ask").addEventListener("blur", () => setTimeout(healViewport, 140));

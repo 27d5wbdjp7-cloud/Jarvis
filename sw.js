@@ -6,7 +6,7 @@
  *  - API-Aufrufe (api.anthropic.com) und alles außer GET gehen immer direkt ins Netz.
  *  - Eine neue Version wartet, bis die App "skipWaiting" schickt (Knopf "Neu laden" im Hinweis).
  */
-const VERSION = "jarvis-v1.1.0";
+const VERSION = "jarvis-v1.1.1";
 const SHELL = [
   "./",
   "./index.html",
